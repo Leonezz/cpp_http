@@ -8,10 +8,12 @@
 #include "boost/beast/http/dynamic_body_fwd.hpp"
 #include "boost/beast/http/impl/read.hpp"
 #include "boost/outcome.hpp"
+#include "message.hpp"
 #include <boost/asio/basic_streambuf_fwd.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/buffers_iterator.hpp>
 #include <boost/asio/error.hpp>
+#include <boost/asio/ssl/stream.hpp>
 #include <boost/beast/core/basic_stream.hpp>
 #include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/core/error.hpp>
@@ -24,6 +26,7 @@
 #include <boost/beast/http/parser_fwd.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/string_body_fwd.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/core/detail/string_view.hpp>
 #include <boost/outcome/result.hpp>
 #include <boost/outcome/success_failure.hpp>
@@ -41,22 +44,6 @@
 #include <system_error>
 
 namespace cpp_http::client {
-struct chunk {
-  std::string chunked_body;
-  std::optional<std::string> extensions;
-};
-
-struct server_sent_event {
-  std::optional<std::string> event;
-  std::optional<std::string> id;
-  std::optional<std::string> data;
-  std::optional<uint64_t> retry;
-
-  inline bool valid() const {
-    return event.has_value() || id.has_value() || data.has_value() ||
-           retry.has_value();
-  }
-};
 template <class Body = boost::beast::http::dynamic_body> class http_response {
 public:
   using value_type = typename Body::value_type;
@@ -82,15 +69,15 @@ public:
     }
 
     // detect content type / transfer encoding
-    auto ctype = parser_.get().base()["Content-Type"];
-    auto te = parser_.get().base()["Transfer-Encoding"];
+    std::string ctype = parser_.get().base()["Content-Type"];
     sse_ = ctype.find("text/event-stream") != std::string::npos;
-    chunked_ = te.find("chunked") != std::string::npos;
+    chunked_ = parser_.get().chunked();
     if (stream_) {
       stream_->expires_never();
     } else if (ssl_stream_) {
       boost::beast::get_lowest_layer(*ssl_stream_).expires_never();
     }
+    return boost::outcome_v2::success();
   }
 
   inline auto status() const { return parser_.get().result(); }
@@ -146,7 +133,7 @@ public:
       size_t line_length{};
       if (stream_) {
         line_length =
-            boost::asio::async_read_until(*stream_, buffer, "\n\n", yield[ec_]);
+            boost::asio::async_read_until(*stream_, buffer, "\n", yield[ec_]);
       } else if (ssl_stream_) {
         line_length = boost::asio::async_read_until(*ssl_stream_, buffer,
                                                     "\n\n", yield[ec_]);
@@ -158,20 +145,19 @@ public:
         if (ec_ == boost::asio::error::eof) {
           done_ = true;
           break;
-        } else {
-          return ec_;
         }
+        return ec_;
       }
 
       std::string block{static_cast<const char *>(buffer.data().data()),
                         line_length};
       buffer.consume(line_length);
 
-      auto message = parse_sse_block(std::move(block));
+      auto message = parse_sse_block(block);
       if (!message.has_value()) {
         continue;
       }
-      tx.async_send(ec_, std::move(message.value()), yield[ec_]);
+      tx.async_send(ec_, std::move(message).value(), yield[ec_]);
       if (ec_) {
         return ec_;
       }
@@ -192,14 +178,14 @@ public:
     parser_.body_limit(std::numeric_limits<std::uint64_t>::max());
     chunk message;
     auto on_chunk_header = [&message](uint64_t size,
-                                         boost::core::string_view extensions,
-                                         boost::beast::error_code &ec) {
+                                      boost::core::string_view extensions,
+                                      boost::beast::error_code &ec) {
       message.extensions = extensions;
       message.chunked_body.reserve(size);
     };
-    auto on_chunk_body = [&message, &tx, yield](
-                             uint64_t remain, boost::core::string_view body,
-                             boost::beast::error_code &ec) {
+    auto on_chunk_body = [&message, &tx, yield](uint64_t remain,
+                                                boost::core::string_view body,
+                                                boost::beast::error_code &ec) {
       message.chunked_body.append(body);
       if (remain == body.size()) {
         // tx.async_send(ec, std::move(message), yield[ec]);
@@ -227,11 +213,12 @@ public:
                                      yield[ec_]);
     }
     if (ec_) {
-      if (ec_ == boost::beast::http::error::need_buffer)
+      if (ec_ == boost::beast::http::error::need_buffer) {
         return read(yield);
-      if (ec_ == boost::asio::error::eof)
+      }
+      if (ec_ == boost::asio::error::eof) {
         done_ = true;
-      else {
+      } else {
         return boost::outcome_v2::failure(ec_);
       }
     }
@@ -282,7 +269,7 @@ private:
         event.data = std::move(value);
       } else {
         event.data->append("\n");
-        event.data->append(std::move(value));
+        event.data->append(value);
       }
     } else if (field == "event") {
       event.event = std::move(value);
@@ -299,7 +286,7 @@ private:
   }
 
   inline static std::optional<server_sent_event>
-  parse_sse_block(std::string block) {
+  parse_sse_block(const std::string& block) {
     if (block.empty()) {
       return {};
     }
@@ -350,9 +337,8 @@ private:
         }
         if (ec_ == boost::asio::error::eof) {
           return boost::outcome_v2::success();
-        } else {
-          return boost::outcome_v2::failure(ec_);
         }
+        return boost::outcome_v2::failure(ec_);
       }
     }
     if (ec_) {
@@ -375,11 +361,9 @@ private:
     parser_.body_limit(std::numeric_limits<std::uint64_t>::max());
     parser_.get().keep_alive(true);
     parser_.eager(true);
-    auto on_chunk_header = [&block](uint64_t size,
-                                         boost::core::string_view extensions,
-                                         boost::beast::error_code &ec) {
-      block.reserve(size);
-    };
+    auto on_chunk_header =
+        [&block](uint64_t size, boost::core::string_view extensions,
+                 boost::beast::error_code &ec) { block.reserve(size); };
     auto on_chunk_body = [&tx, yield, &block,
                           this](uint64_t remain, boost::core::string_view body,
                                 boost::beast::error_code &ec) {

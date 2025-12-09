@@ -8,14 +8,14 @@
 #include <iostream>
 
 int main() {
-  const auto url = "http://www.baidu.com/";
+  const auto *const url = "http://www.baidu.com/";
   auto request = cpp_http::client::request_builder()
                      .method(boost::beast::http::verb::get)
                      .timeout(std::chrono::milliseconds(60000))
                      .base_url(url)
                      .build();
-  std::cout << "Request URL: " << request.url.buffer() << std::endl;
-  std::cout << "req: " << request.request << std::endl;
+  std::cout << "Request URL: " << request.url.buffer() << '\n';
+  std::cout << "req: " << request.request << '\n';
   boost::asio::io_context ioc;
   boost::asio::ip::tcp::resolver resolver(ioc);
   for (int i = 0; i < 200; ++i) {

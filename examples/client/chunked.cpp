@@ -21,12 +21,12 @@ int main() {
                      .timeout(std::chrono::milliseconds(60000))
                      .base_url(url)
                      .build();
-  std::cout << "Request URL: " << request.url.buffer() << std::endl;
-  std::cout << "req: " << request.request << std::endl;
+  std::cout << "Request URL: " << request.url.buffer() << '\n';
+  std::cout << "req: " << request.request << '\n';
   boost::asio::io_context ioc;
   boost::asio::ip::tcp::resolver resolver(ioc);
   boost::asio::experimental::channel<void(boost::system::error_code,
-                                          cpp_http::client::chunk)>
+                                          cpp_http::chunk)>
       ch(ioc, 10);
 
   boost::asio::spawn(
@@ -50,7 +50,7 @@ int main() {
         }
       },
       [&ch](auto &) {
-        std::cout << "produce complete" << std::endl;
+        std::cout << "produce complete" << '\n';
         ch.close();
       });
 

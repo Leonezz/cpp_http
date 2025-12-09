@@ -39,7 +39,7 @@ inline boost::asio::ssl::context &get_ssl_context() {
   return context;
 }
 
-inline std::string_view user_agent() { return "cpp-http client"; }
+inline std::string_view user_agent() { return "cpp-http/client"; }
 
 template <class Response, class Request>
 inline boost::outcome_v2::result<std::unique_ptr<http_response<Response>>>
@@ -92,7 +92,7 @@ send_http(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
     stream->expires_after(std::chrono::milliseconds(req.timeout_ms));
   }
   auto url = req.url;
-  auto &&endpoints = resolve(url, resolver, yield);
+  auto endpoints = resolve(url, resolver, yield);
   if (endpoints.has_error()) {
     return endpoints.error();
   }
@@ -110,7 +110,8 @@ send_http(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
   }
 
   auto resp = std::make_unique<http_response<Response>>(std::move(stream));
-  if (auto init_result = resp->init_parser(yield); init_result.has_error()) {
+  if (auto init_result = resp->init_parser(yield[ec]);
+      init_result.has_error()) {
     return init_result.error();
   }
   if (resp->is_redirection() && req.auto_redirect) {
@@ -125,9 +126,8 @@ send_http(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
     return send<Response, Request>(std::move(req), resolver, redirect_count + 1,
                                    yield);
     // continue to next loop to redirect
-  } else {
-    return boost::outcome_v2::success(std::move(resp));
   }
+  return boost::outcome_v2::success(std::move(resp));
 }
 
 template <class Response, class Request>
@@ -204,9 +204,8 @@ boost::outcome_v2::
     return send<Response, Request>(std::move(req), resolver, redirect_count + 1,
                                    yield);
     // continue to next loop to redirect
-  } else {
-    return boost::outcome_v2::success(std::move(resp));
   }
+  return boost::outcome_v2::success(std::move(resp));
 }
 
 template <class Response, class Request>

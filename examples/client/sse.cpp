@@ -12,25 +12,25 @@
 #include <boost/system/detail/error_code.hpp>
 #include <chrono>
 #include <iostream>
+#include <memory>
 
-int main() {
-  const auto url = "http://localhost:8080/sse";
+int main(int argc, char *argv[]) {
+  const auto *url = argv[1];
   auto request = cpp_http::client::request_builder()
                      .method(boost::beast::http::verb::get)
                      .timeout(std::chrono::milliseconds(60000))
                      .base_url(url)
                      .build();
-  std::cout << "Request URL: " << request.url.buffer() << std::endl;
-  std::cout << "req: " << request.request << std::endl;
-  boost::asio::io_context ioc;
+  std::cout << "Request URL: " << request.url.buffer() << '\n';
+  std::cout << "req: " << request.request << '\n';
+  boost::asio::io_context ioc{BOOST_ASIO_CONCURRENCY_HINT_SAFE};
   boost::asio::ip::tcp::resolver resolver(ioc);
-  boost::asio::experimental::channel<void(boost::system::error_code,
-                                          cpp_http::client::server_sent_event)>
-      ch(ioc, 10);
+  auto ch = std::make_shared<boost::asio::experimental::channel<void(
+      boost::system::error_code, cpp_http::server_sent_event)>>(ioc, 10);
 
   boost::asio::spawn(
       ioc,
-      [&](boost::asio::yield_context yield) {
+      [&request, ch](boost::asio::yield_context yield) {
         auto response_outcome =
             cpp_http::client::send<boost::beast::http::string_body,
                                    boost::beast::http::string_body>(request,
@@ -42,20 +42,24 @@ int main() {
         std::cout << "Response received for request"
                   << ", done: " << response_outcome.value()->complete() << "\n";
         auto &response = response_outcome.value();
-        auto ec = response->read_sse(ch, yield);
+        auto ec = response->read_sse(*ch, yield);
         if (ec.has_error()) {
           std::cout << "produce error: " << ec.error().category().name() << ":"
                     << ec.error().message() << "\n";
         }
       },
-      [](auto &) { std::cout << "complete" << std::endl; });
+      [ch](auto &) {
+        std::cout << "complete" << '\n';
+        ch->cancel();
+        ch->close();
+      });
 
   boost::asio::spawn(
       ioc,
-      [&](boost::asio::yield_context yield) {
+      [ch](boost::asio::yield_context yield) {
         while (true) {
           boost::system::error_code ec;
-          auto message = ch.async_receive(yield[ec]);
+          auto message = ch->async_receive(yield[ec]);
           if (ec) {
             std::cout << "error consume: " << ec.to_string() << "\n";
             break;

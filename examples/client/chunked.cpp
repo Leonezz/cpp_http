@@ -26,7 +26,7 @@ int main() {
   boost::asio::io_context ioc;
   boost::asio::ip::tcp::resolver resolver(ioc);
   boost::asio::experimental::channel<void(boost::system::error_code,
-                                          cpp_http::chunk)>
+                                          cpp_http::http_chunk)>
       ch(ioc, 10);
 
   boost::asio::spawn(

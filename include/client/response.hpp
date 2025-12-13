@@ -44,16 +44,16 @@
 #include <system_error>
 
 namespace cpp_http::client {
-template <class Body = boost::beast::http::dynamic_body> class http_response {
+template <class Body = boost::beast::http::dynamic_body> class incoming_response {
 public:
   using value_type = typename Body::value_type;
-  explicit http_response(std::unique_ptr<boost::beast::tcp_stream> stream)
+  explicit incoming_response(std::unique_ptr<boost::beast::tcp_stream> stream)
       : stream_(std::move(stream)), done_(false) {}
-  explicit http_response(
+  explicit incoming_response(
       std::unique_ptr<boost::asio::ssl::stream<boost::beast::tcp_stream>>
           ssl_stream)
       : ssl_stream_(std::move(ssl_stream)), done_(false) {}
-  ~http_response() { close(); }
+  ~incoming_response() { close(); }
 
   inline boost::outcome_v2::result<void>
   init_parser(boost::asio::yield_context yield) {
@@ -166,7 +166,7 @@ public:
   }
 
   inline boost::outcome_v2::result<void> read_chunked_encoding(
-      boost::asio::experimental::channel<void(boost::system::error_code, chunk)>
+      boost::asio::experimental::channel<void(boost::system::error_code, http_chunk)>
           &tx,
       boost::asio::yield_context yield) {
     if (done_) {
@@ -176,7 +176,7 @@ public:
       return boost::beast::http::error::bad_transfer_encoding;
     }
     parser_.body_limit(std::numeric_limits<std::uint64_t>::max());
-    chunk message;
+    http_chunk message;
     auto on_chunk_header = [&message](uint64_t size,
                                       boost::core::string_view extensions,
                                       boost::beast::error_code &ec) {

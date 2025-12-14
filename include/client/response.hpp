@@ -44,16 +44,16 @@
 #include <system_error>
 
 namespace cpp_http::client {
-template <class Body = boost::beast::http::dynamic_body> class incoming_response {
+template <class Body = boost::beast::http::dynamic_body> class response {
 public:
   using value_type = typename Body::value_type;
-  explicit incoming_response(std::unique_ptr<boost::beast::tcp_stream> stream)
+  explicit response(std::unique_ptr<boost::beast::tcp_stream> stream)
       : stream_(std::move(stream)), done_(false) {}
-  explicit incoming_response(
+  explicit response(
       std::unique_ptr<boost::asio::ssl::stream<boost::beast::tcp_stream>>
           ssl_stream)
       : ssl_stream_(std::move(ssl_stream)), done_(false) {}
-  ~incoming_response() { close(); }
+  ~response() { close(); }
 
   inline boost::outcome_v2::result<void>
   init_parser(boost::asio::yield_context yield) {
@@ -93,7 +93,7 @@ public:
            status_code == boost::beast::http::status::permanent_redirect;
   }
 
-  inline const auto &headers() const { return parser_.get().base(); }
+  inline const auto &header() const { return parser_.get().base(); }
 
   inline std::optional<boost::urls::url> redirect_url() const {
     if (!is_redirection()) {
@@ -133,7 +133,7 @@ public:
       size_t line_length{};
       if (stream_) {
         line_length =
-            boost::asio::async_read_until(*stream_, buffer, "\n", yield[ec_]);
+            boost::asio::async_read_until(*stream_, buffer, "\n\n", yield[ec_]);
       } else if (ssl_stream_) {
         line_length = boost::asio::async_read_until(*ssl_stream_, buffer,
                                                     "\n\n", yield[ec_]);
@@ -151,12 +151,11 @@ public:
 
       std::string block{static_cast<const char *>(buffer.data().data()),
                         line_length};
-      buffer.consume(line_length);
-
       auto message = parse_sse_block(block);
       if (!message.has_value()) {
         continue;
       }
+      buffer.consume(line_length);
       tx.async_send(ec_, std::move(message).value(), yield[ec_]);
       if (ec_) {
         return ec_;
@@ -166,8 +165,8 @@ public:
   }
 
   inline boost::outcome_v2::result<void> read_chunked_encoding(
-      boost::asio::experimental::channel<void(boost::system::error_code, http_chunk)>
-          &tx,
+      boost::asio::experimental::channel<void(boost::system::error_code,
+                                              http_chunk)> &tx,
       boost::asio::yield_context yield) {
     if (done_) {
       return boost::asio::error::eof;
@@ -245,10 +244,6 @@ public:
     done_ = true;
   }
 
-  inline boost::beast::http::response_header<Body> header() const {
-    return parser_.get();
-  }
-
 private:
   inline static void parse_sse_line(std::string line,
                                     server_sent_event &event) {
@@ -286,7 +281,7 @@ private:
   }
 
   inline static std::optional<server_sent_event>
-  parse_sse_block(const std::string& block) {
+  parse_sse_block(const std::string &block) {
     if (block.empty()) {
       return {};
     }
@@ -372,10 +367,11 @@ private:
         if (!boost::core::string_view{block}.ends_with("\n\n")) {
           return body.length();
         }
-        auto message = parse_sse_block(std::move(block));
+        auto message = parse_sse_block(block);
         if (!message.has_value()) {
           return body.length();
         }
+        block.clear();
         // tx.async_send(ec, std::move(message), yield[ec]);
         tx.try_send(ec, std::move(message.value()));
       }

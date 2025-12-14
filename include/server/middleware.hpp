@@ -62,8 +62,8 @@ public:
 };
 
 class after_response_middleware : public middleware {
-  using after_response_handler_t = std::function<result<outgoing_response>(
-      result<outgoing_response> &&, boost::asio::yield_context)>;
+  using after_response_handler_t = std::function<result<response>(
+      result<response> &&, boost::asio::yield_context)>;
   after_response_handler_t handler_;
 
 public:

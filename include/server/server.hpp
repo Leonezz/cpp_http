@@ -47,7 +47,7 @@ class server {
   std::vector<std::pair<std::unique_ptr<matcher>, std::unique_ptr<service>>>
       options_services_;
 
-  inline outgoing_response dispatch_request(request &&req,
+  inline response dispatch_request(request &&req,
                                             boost::asio::yield_context yield) {
     auto method = req.request_cref().method();
     static std::vector<
@@ -76,13 +76,13 @@ class server {
       if (matcher.first->match(req)) {
         auto res = matcher.second->handle_request(std::move(req), yield);
         if (res.has_error()) {
-          return outgoing_response{
+          return response{
               server_error(request, res.error().to_string())};
         }
         return std::move(res).value();
       }
     }
-    return outgoing_response{not_found(request)};
+    return response{not_found(request)};
   }
 
   boost::outcome_v2::result<void>

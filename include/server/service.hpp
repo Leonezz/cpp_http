@@ -29,7 +29,7 @@ namespace cpp_http::server {
 class service {
 public:
   virtual ~service() = default;
-  virtual result<outgoing_response>
+  virtual result<response>
   handle_request(request &&request, boost::asio::yield_context yield) = 0;
 };
 
@@ -41,7 +41,7 @@ public:
                          boost::local_shared_ptr<streaming_channel> tx,
                          boost::asio::yield_context yield) = 0;
 
-  result<outgoing_response>
+  result<response>
   handle_request(request &&request, boost::asio::yield_context yield) override {
     auto channel =
         boost::make_local_shared<streaming_channel>(yield.get_executor(), 10);
@@ -55,7 +55,7 @@ public:
       header.value().chunked(true);
     }
 
-    return outgoing_response{std::move(header).value(), std::move(channel)};
+    return response{std::move(header).value(), std::move(channel)};
   }
 };
 
@@ -84,7 +84,7 @@ public:
 class dummy_service : public service {
 public:
   ~dummy_service() final = default;
-  result<outgoing_response>
+  result<response>
   handle_request(request &&request, boost::asio::yield_context yield) final {
     return std::move(response_builder{}
                          .status(boost::beast::http::status::ok)
@@ -133,7 +133,7 @@ public:
 };
 
 class function_service : public service {
-  using service_func_t = std::function<result<outgoing_response>(
+  using service_func_t = std::function<result<response>(
       request &&request, boost::asio::yield_context yield)>;
 
   service_func_t func_;
@@ -142,7 +142,7 @@ public:
   template <typename F>
   explicit function_service(F func) : func_(std::move(func)) {}
   ~function_service() override = default;
-  result<outgoing_response>
+  result<response>
   handle_request(request &&request, boost::asio::yield_context yield) override {
     return func_(std::move(request), yield);
   }
@@ -159,7 +159,7 @@ public:
   explicit pre_request_service(F handler, std::unique_ptr<service> inner)
       : handler_(std::move(handler)), inner_(std::move(inner)) {}
   ~pre_request_service() override = default;
-  result<outgoing_response>
+  result<response>
   handle_request(request &&request, boost::asio::yield_context yield) override {
     auto new_request = handler_(std::move(request), yield);
     return inner_->handle_request(std::move(new_request), yield);
@@ -167,8 +167,8 @@ public:
 };
 
 class after_response_service : public service {
-  using after_response_handler_t = std::function<result<outgoing_response>(
-      result<outgoing_response> &&, boost::asio::yield_context)>;
+  using after_response_handler_t = std::function<result<response>(
+      result<response> &&, boost::asio::yield_context)>;
   after_response_handler_t handler_;
   std::unique_ptr<service> inner_;
 
@@ -177,7 +177,7 @@ public:
   explicit after_response_service(F handler, std::unique_ptr<service> inner)
       : handler_(std::move(handler)), inner_(std::move(inner)) {}
   ~after_response_service() override = default;
-  result<outgoing_response>
+  result<response>
   handle_request(request &&request, boost::asio::yield_context yield) override {
     auto response = inner_->handle_request(std::move(request), yield);
     return handler_(std::move(response), yield);

@@ -32,7 +32,7 @@ struct abstract_response {
   virtual boost::beast::http::message_generator to_generator() && = 0;
 };
 
-template <class Body> class response_impl : abstract_response {
+template <class Body> class response_impl : public abstract_response {
   boost::beast::http::response<Body> msg_;
 
 public:
@@ -81,7 +81,7 @@ using streaming_channel = boost::asio::experimental::channel<void(
     boost::system::error_code, http_chunk)>;
 using empty_response =
     boost::beast::http::response<boost::beast::http::empty_body>;
-class outgoing_response {
+class response {
 public:
   struct streaming_response {
     empty_response header_;
@@ -103,25 +103,22 @@ public:
   };
 
 private:
-  std::variant<mutable_response, streaming_response> response_;
+  std::variant<mutable_response, streaming_response> inner_;
 
 public:
-  explicit outgoing_response(mutable_response &&res)
-      : response_(std::move(res)) {}
-  explicit outgoing_response(streaming_response &&res)
-      : response_(std::move(res)) {}
+  explicit response(mutable_response &&res) : inner_(std::move(res)) {}
+  explicit response(streaming_response &&res) : inner_(std::move(res)) {}
   template <typename Response>
-  explicit outgoing_response(Response res)
-      : outgoing_response(mutable_response{std::move(res)}) {}
-  explicit outgoing_response(empty_response header,
-                             boost::local_shared_ptr<streaming_channel> rx)
-      : outgoing_response(
-            streaming_response(std::move(header), std::move(rx))) {}
-  ~outgoing_response() = default;
-  outgoing_response(const outgoing_response &) = delete;
-  outgoing_response &operator=(const outgoing_response &) = delete;
-  outgoing_response(outgoing_response &&) noexcept = default;
-  outgoing_response &operator=(outgoing_response &&) noexcept = default;
+  explicit response(Response res)
+      : response(mutable_response{std::move(res)}) {}
+  explicit response(empty_response header,
+                    boost::local_shared_ptr<streaming_channel> rx)
+      : response(streaming_response(std::move(header), std::move(rx))) {}
+  ~response() = default;
+  response(const response &) = delete;
+  response &operator=(const response &) = delete;
+  response(response &&) noexcept = default;
+  response &operator=(response &&) noexcept = default;
 
   const boost::beast::http::response_header<> &header_cref() const {
     return std::visit(
@@ -133,7 +130,7 @@ public:
                      -> boost::beast::http::response_header<> const & {
                    return res.header_cref();
                  }},
-        response_);
+        inner_);
   }
 
   boost::beast::http::response_header<> &header_ref() {
@@ -145,15 +142,15 @@ public:
                                    -> boost::beast::http::response_header<> & {
                                  return res.header_ref();
                                }},
-                      response_);
+                      inner_);
   }
 
   template <typename F> void visit(F &&f) const {
-    std::visit(std::forward<F>(f), response_);
+    std::visit(std::forward<F>(f), inner_);
   }
 
   template <typename F> void visit(F &&f) {
-    std::visit(std::forward<F>(f), response_);
+    std::visit(std::forward<F>(f), inner_);
   }
 
   void async_write(boost::beast::tcp_stream &stream,
@@ -185,7 +182,7 @@ public:
             async_write_basic_response,
             async_write_streaming_response,
         },
-        std::move(response_));
+        std::move(inner_));
   }
 };
 
@@ -245,18 +242,17 @@ public:
   }
 
   template <typename Body, typename Param = Body>
-  outgoing_response body(Param &&body) && {
+  response body(Param &&body) && {
     boost::beast::http::response<Body> res{std::move(header_).base()};
     res.body() = std::forward<Param>(body);
-    return outgoing_response(std::move(res));
+    return response{std::move(res)};
   }
 
   empty_response empty() && { return std::move(header_); }
 
-  outgoing_response
-  streaming(boost::local_shared_ptr<streaming_channel> rx) && {
+  response streaming(boost::local_shared_ptr<streaming_channel> rx) && {
     header_.chunked(true);
-    return outgoing_response(std::move(header_), std::move(rx));
+    return response{std::move(header_), std::move(rx)};
   }
 };
 } // namespace cpp_http::server

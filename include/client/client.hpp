@@ -42,17 +42,17 @@ inline boost::asio::ssl::context &get_ssl_context() {
 inline std::string_view user_agent() { return "cpp-http/client"; }
 
 template <class Response, class Request>
-inline boost::outcome_v2::result<std::unique_ptr<incoming_response<Response>>>
+inline boost::outcome_v2::result<std::unique_ptr<response<Response>>>
 send_http(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
           uint64_t redirect_count, boost::asio::yield_context yield);
 
 template <class Response, class Request>
-inline boost::outcome_v2::result<std::unique_ptr<incoming_response<Response>>>
+inline boost::outcome_v2::result<std::unique_ptr<response<Response>>>
 send_https(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
            uint64_t redirect_count, boost::asio::yield_context yield);
 
 template <class Response, class Request>
-inline boost::outcome_v2::result<std::unique_ptr<incoming_response<Response>>>
+inline boost::outcome_v2::result<std::unique_ptr<response<Response>>>
 send(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
      uint64_t redirect_count, boost::asio::yield_context yield) {
   const auto &url = req.url;
@@ -82,7 +82,7 @@ resolve(boost::urls::url_view url, boost::asio::ip::tcp::resolver &resolver,
 }
 
 template <class Response, class Request>
-inline boost::outcome_v2::result<std::unique_ptr<incoming_response<Response>>>
+inline boost::outcome_v2::result<std::unique_ptr<response<Response>>>
 send_http(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
           uint64_t redirect_count, boost::asio::yield_context yield) {
   boost::beast::error_code ec;
@@ -109,7 +109,7 @@ send_http(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
     return ec;
   }
 
-  auto resp = std::make_unique<incoming_response<Response>>(std::move(stream));
+  auto resp = std::make_unique<response<Response>>(std::move(stream));
   if (auto init_result = resp->init_parser(yield[ec]);
       init_result.has_error()) {
     return init_result.error();
@@ -132,7 +132,7 @@ send_http(http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
 
 template <class Response, class Request>
 boost::outcome_v2::
-    result<std::unique_ptr<incoming_response<Response>>> inline send_https(
+    result<std::unique_ptr<response<Response>>> inline send_https(
         http_request<Request> req, boost::asio::ip::tcp::resolver &resolver,
         uint64_t redirect_count, boost::asio::yield_context yield) {
   boost::beast::error_code ec;
@@ -188,7 +188,7 @@ boost::outcome_v2::
     return ec;
   }
 
-  auto resp = std::make_unique<incoming_response<Response>>(std::move(ssl_stream));
+  auto resp = std::make_unique<response<Response>>(std::move(ssl_stream));
   if (auto init_result = resp->init_parser(yield); init_result.has_error()) {
     return init_result.error();
   }
@@ -209,7 +209,7 @@ boost::outcome_v2::
 }
 
 template <class Response, class Request>
-boost::outcome_v2::result<std::unique_ptr<incoming_response<Response>>> inline send(
+boost::outcome_v2::result<std::unique_ptr<response<Response>>> inline send(
     http_request<Request> req, boost::asio::yield_context yield) {
   auto resolver = boost::asio::ip::tcp::resolver(yield.get_executor());
   return send<Response, Request>(req, resolver, 0, yield);
